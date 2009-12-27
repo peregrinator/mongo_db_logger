@@ -24,7 +24,9 @@ class MongoLogger < ActiveSupport::BufferedLogger
   class << self
     attr_reader :mongo_collection_name, :mongo_connection
   end
-
+  
+  RESERVED_MONGO_LOGGER_KEYS = [:messages, :request_time, :ip, :runtime]
+  
   def initialize(level=DEBUG)
     super(File.join(Rails.root, "log/#{Rails.env}.log"), level)
   end
@@ -39,7 +41,7 @@ class MongoLogger < ActiveSupport::BufferedLogger
       when 5 then :unknown
     end
   end
-
+  
   def mongoize(options={})   
     @mongo_record = options.merge({
       :messages => Hash.new { |hash, key| hash[key] = Array.new },
@@ -53,14 +55,11 @@ class MongoLogger < ActiveSupport::BufferedLogger
   end
 
   def add_metadata(options={})
-    options.each_pair do |key, value|
-      unless [:messages, :request_time, :ip, :runtime].include?(key.to_sym)
-        info("[MongoLogger : metadata] '#{key}' => '#{value}'")
-        @mongo_record[key] = value
-      else
-        raise ArgumentError, ":#{key} is a reserved key for the mongo logger. Please choose a different key"
-      end
+    options.keys.each do |key|
+      raise ArgumentError, ":#{key} is a reserved key for the mongo logger. Please choose a different key" if RESERVED_MONGO_LOGGER_KEYS.include?(key.to_sym)
     end
+
+    @mongo_record.recursive_merge!(options)
   end
 
   def add(severity, message = nil, progname = nil, &block)
@@ -76,3 +75,31 @@ class MongoLogger < ActiveSupport::BufferedLogger
     super
   end
 end # class MongoLogger
+
+class Hash
+  # Taken from Ruby facets - http://facets.rubyforge.org/apidoc/api/core/classes/Hash.html
+  def recursive_merge(other)
+    hash = self.dup
+    other.each do |key, value|
+      myval = self[key]
+      if value.is_a?(Hash) && myval.is_a?(Hash)
+        hash[key] = myval.recursive_merge(value)
+      else
+        hash[key] = value
+      end
+    end
+    hash
+  end
+  
+  def recursive_merge!(other)
+    other.each do |key, value|
+      myval = self[key]
+      if value.is_a?(Hash) && myval.is_a?(Hash)
+        myval.recursive_merge!(value)
+      else
+        self[key] = value
+      end
+    end
+    self
+  end
+end
